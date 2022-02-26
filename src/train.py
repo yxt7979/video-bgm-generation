@@ -73,7 +73,7 @@ if __name__ == '__main__':
         train_x[i, :total, 7] = train_x[i, :total, 7] + 1
 
     init_token = np.zeros((train_x.shape[0], 7, 3), dtype=np.int32)
-    print('init_token:',init_token.shape)
+    # print('init_token:',init_token.shape)
 
     num_batch = len(train_x) // batch_size
 
@@ -167,7 +167,7 @@ if __name__ == '__main__':
 
             # run,在这里用CMT网络
             losses = net(is_train=True, x=batch_x, target=batch_y, loss_mask=batch_mask, init_token=batch_init)
-            print('before 162 in train.py========================')
+            # print('before 162 in train.py========================')
             losses = [l.sum() for l in losses]
             loss = (losses[0] + losses[1] + losses[2] + losses[3] + losses[4] + losses[5] + losses[6]) / 7
 

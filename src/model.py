@@ -85,9 +85,6 @@ last dimension of input data | attribute:
 
 class CMT(nn.Module):
     def __init__(self, n_token, init_n_token, is_training=True):
-        self.encoder_emb_time_linear = None
-        self.encoder_emb_linear = None
-        self.encoder_pos_emb = None
         print('********************__init__***************************')
         super(CMT, self).__init__()
 
@@ -128,7 +125,7 @@ class CMT(nn.Module):
         self.encoder_emb_onset_density = Embeddings(self.n_token[6], self.emb_sizes[6])
         self.encoder_emb_time_encoding = Embeddings(self.n_token[7], self.time_encoding_size)
         # 在同一节拍内的每个标记将得到相同的位置编码
-        self.encoder_pos_emb_func = BeatPositionalEncoding(self.d_model, self.dropout)
+        self.encoder_pos_emb = BeatPositionalEncoding(self.d_model, self.dropout)
 
         # # linear
         self.encoder_in_linear = nn.Linear(int(np.sum(self.emb_sizes)), self.d_model)
@@ -158,21 +155,21 @@ class CMT(nn.Module):
         self.proj_onset_density = nn.Linear(self.d_model, self.n_token[6])
 
     def compute_loss(self, predict, target, loss_mask):
-        print('********************compute_loss***************************')
+        # print('********************compute_loss***************************')
         loss = self.loss_func(predict, target)
         loss = loss * loss_mask
         loss = torch.sum(loss) / torch.sum(loss_mask)
         return loss
 
     def forward_init_token_vis(self, x, memory=None, is_training=True):
-        print('********************forward_init_token_vis***************************')
+        # print('********************forward_init_token_vis***************************')
         emb_genre = self.init_emb_genre(x[..., 0])
         emb_key = self.init_emb_key(x[..., 1])
         emb_instrument = self.init_emb_instrument(x[..., 2])
         return emb_genre, emb_key, emb_instrument
 
     def forward_init_token(self, x, memory=None, is_training=True):
-        print('********************forward_init_token***************************')
+        # print('********************forward_init_token***************************')
         emb_genre = self.init_emb_genre(x[..., 0])
         emb_key = self.init_emb_key(x[..., 1])
         emb_instrument = self.init_emb_instrument(x[..., 2])
@@ -188,12 +185,12 @@ class CMT(nn.Module):
         else:
             pos_emb = encoder_emb_linear.squeeze(0)
             h, memory = self.transformer_encoder(pos_emb, memory=memory)
-            print('--------use transformer in model.py 188--------------------------------')
+            # print('--------use transformer in model.py 188--------------------------------')
             y_type = self.proj_type(h)
             return h, y_type, memory
 
     def forward_hidden(self, x, memory=None, is_training=True, init_token=None):
-        print('***********forward_hidden***************************')
+        # print('***********forward_hidden***************************')
         # h, y_type = self.forward_hidden(x, memory=None, is_training=True, init_token=init_token)
         # linear transformer: b, s, f   x.shape=(bs, nf)
 
@@ -219,36 +216,33 @@ class CMT(nn.Module):
                 emb_onset_density
             ], dim=-1)
 
-        self.encoder_emb_linear = self.encoder_in_linear(embs)
+        encoder_emb_linear = self.encoder_in_linear(embs)
         # import ipdb;ipdb.set_trace()
-        self.encoder_emb_time_linear = self.encoder_time_linear(emb_time_encoding)
-        # print(self.encoder_emb_linear.size())
-        self.encoder_emb_linear = self.encoder_emb_linear + self.encoder_emb_time_linear
-        # print(encoder_emb_linear.size())
-        self.encoder_pos_emb = self.encoder_pos_emb_func(self.encoder_emb_linear, x[:, :, 8])
-        # print(encoder_pos_emb.size())
+        encoder_emb_time_linear = self.encoder_time_linear(emb_time_encoding)
+        encoder_emb_linear = encoder_emb_linear + encoder_emb_time_linear
+        encoder_pos_emb = self.encoder_pos_emb(encoder_emb_linear, x[:, :, 8])
 
         if is_training:
             assert init_token is not None
             init_emb_linear = self.forward_init_token(init_token)
-            self.encoder_pos_emb = torch.cat([init_emb_linear, self.encoder_pos_emb], dim=1)
+            encoder_pos_emb = torch.cat([init_emb_linear, encoder_pos_emb], dim=1)
         else:
             assert init_token is not None
             init_emb_linear = self.forward_init_token(init_token)
-            self.encoder_pos_emb = torch.cat([init_emb_linear, self.encoder_pos_emb], dim=1)
+            encoder_pos_emb = torch.cat([init_emb_linear, encoder_pos_emb], dim=1)
         # transformer
         if is_training:
-            attn_mask = TriangularCausalMask(self.encoder_pos_emb.size(1), device=x.device)
-            encoder_hidden = self.transformer_encoder(self.encoder_pos_emb, attn_mask)
-            print('--------use transformer in model.py 234--------------------------------')
+            attn_mask = TriangularCausalMask(encoder_pos_emb.size(1), device=x.device)
+            self.encoder_hidden = self.transformer_encoder(encoder_pos_emb, attn_mask)
+            # print('--------use transformer in model.py 234--------------------------------')
             # print("forward decoder done")
-            y_type = self.proj_type(encoder_hidden[:, 7:, :])
-            return encoder_hidden, y_type
+            y_type = self.proj_type(self.encoder_hidden[:, 7:, :])
+            return self.encoder_hidden, y_type
 
         else:
-            encoder_mask = TriangularCausalMask(self.encoder_pos_emb.size(1), device=x.device)
-            h = self.transformer_encoder(self.encoder_pos_emb, encoder_mask)  # y: s x d_model
-            print('--------use transformer in model.py 242--------------------------------')
+            encoder_mask = TriangularCausalMask(encoder_pos_emb.size(1), device=x.device)
+            h = self.transformer_encoder(encoder_pos_emb, encoder_mask)  # y: s x d_model
+            # print('--------use transformer in model.py 242--------------------------------')
             h = h[:, -1:, :]
             h = h.squeeze(0)
             y_type = self.proj_type(h)
@@ -256,7 +250,7 @@ class CMT(nn.Module):
             return h, y_type
 
     def forward_output(self, h, y):
-        print('***********forward_output***************************')
+        # print('***********forward_output***************************')
         # for training
         tf_skip_type = self.encoder_emb_type(y[..., 1])
         h = h[:, 7:, :]
@@ -275,7 +269,7 @@ class CMT(nn.Module):
         return y_barbeat, y_pitch, y_duration, y_instr, y_onset_density, y_beat_density
 
     def forward_output_sampling(self, h, y_type, recurrent=True):
-        print('********************forward_output_sampling***************************')
+        # print('********************forward_output_sampling***************************')
         '''
         for inference
         由h和type，估计出风格并concat后，返回估计的7个属性
@@ -326,7 +320,7 @@ class CMT(nn.Module):
         return next_arr
 
     def inference_from_scratch(self, **kwargs):
-        print('********************inference_from_scratch***************************')
+        # print('********************inference_from_scratch***************************')
         vlog = kwargs['vlog']
         C = kwargs['C']
 
@@ -471,14 +465,14 @@ class CMT(nn.Module):
 
 
     def train_forward(self, **kwargs):
-        print('********************train_forward***************************')
+        # print('********************train_forward***************************')
         # losses = net(is_train=True, x=batch_x, target=batch_y, loss_mask=batch_mask, init_token=batch_init)
         x = kwargs['x']             # train_x
         target = kwargs['target']   # train_y
         loss_mask = kwargs['loss_mask']
         init_token = kwargs['init_token']
         h, y_type = self.forward_hidden(x, memory=None, is_training=True, init_token=init_token)
-        print('h,y_type:',h,y_type)
+        # print('h,y_type:',h,y_type)
         y_barbeat, y_pitch, y_duration, y_instr, y_onset_density, y_beat_density = self.forward_output(h, target)
 
         # reshape (b, s, f) -> (b, f, s)
@@ -509,7 +503,7 @@ class CMT(nn.Module):
         return loss_barbeat, loss_type, loss_pitch, loss_duration, loss_instr, loss_onset_density, loss_beat_density
 
     def forward(self, **kwargs):
-        print('********************in forward***************************')
+        # print('********************in forward***************************')
         # losses = net(is_train=True, x=batch_x, target=batch_y, loss_mask=batch_mask, init_token=batch_init)
         if kwargs['is_train']:
             return self.train_forward(**kwargs)

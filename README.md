@@ -35,11 +35,16 @@ We address the unexplored task – *video background music generation*. We first
 ## Preparation
 
 * clone this repo
+
 * download the processed data `lpd_5_prcem_mix_v8_10000.npz`  from [HERE](https://drive.google.com/file/d/1MWnwwAdOrjC31dSy8kfyxHwv35wK0pQh/view?usp=sharing) and put it under `dataset/` 
 
 * download the pretrained model `loss_8_params.pt` from [HERE](https://drive.google.com/file/d/1Ud2-GXEr4PbRDDe-FZJwzqqZrbbWFxM-/view?usp=sharing) and put it under `exp/` 
 
 * install `ffmpeg=3.2.4` 
+
+  ```shell
+  conda install ffmpeg -c conda-forge
+  ```
 
 * prepare a Python3 conda environment
 
@@ -107,7 +112,17 @@ print([track.name for track in midi.tracks]) # Should be like ['Drums', 'Guitar'
   ```shell
   conda activate mm21_py2
   cd src/video2npz
-  sh video2npz.sh ../../videos/xxx.mp4
+  export MPLBACKEND=Agg
+  # extract flow magnitude into optical_flow/flow.npz
+  MPLBACKEND=Agg python optical_flow.py --video ../../videos/CMTvideo.mp4 
+  
+  # convert video into metadata.json with flow magnitude
+  cp ../ffmpeg-linux64-v3.3.1 ffmpeg-linux64-v3.3.1
+  mv ffmpeg-linux64-v3.3.1 ~/.imageio/ffmpeg/
+  python video2metadata.py --video ../../videos/CMTvideo.mp4 
+  
+  # convert metadata into .npz under `inference/`
+  python metadata2numpy_mix.py --video ../../videos/CMTvideo.mp4 
   ```
   
   * try resizing the video if this takes a long time
@@ -116,6 +131,7 @@ print([track.name for track in midi.tracks]) # Should be like ['Drums', 'Guitar'
 
   ```shell
   conda activate mm21_py3
+  cd src
   python gen_midi_conditional.py -f "../inference/xxx.npz" -c "../exp/loss_8_params.pt"
   ```
   
