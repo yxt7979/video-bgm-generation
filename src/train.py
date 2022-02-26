@@ -17,15 +17,16 @@ from model import CMT
 
 
 
-def train_dp():
+# def train_dp():
+if __name__ == '__main__':
     parser = argparse.ArgumentParser(description="Args for training CMT")
-    parser.add_argument('-n', '--name', default="debug",
+    parser.add_argument('-n', '--name', default="yxttest",
                         help="Name of the experiment, also the log file and checkpoint directory. If 'debug', checkpoints won't be saved")
     parser.add_argument('-l', '--lr', default=0.0001, help="Initial learning rate")
-    parser.add_argument('-b', '--batch_size', default=6, help="Batch size")
+    parser.add_argument('-b', '--batch_size', default=1, help="Batch size")
     parser.add_argument('-p', '--path', help="If set, load model from the given path")
-    parser.add_argument('-e', '--epochs', default=200, help="Num of epochs")
-    parser.add_argument('-t', '--train_data', default='../dataset/lpd_5_prcem_mix_v8_10000.npz',
+    parser.add_argument('-e', '--epochs', default=1, help="Num of epochs")
+    parser.add_argument('-t', '--train_data', default='../../lpd_5_prcem_mix_v8_10000.npz',
                         help="Path of the training data (.npz file)")
     parser.add_argument('-g', '--gpus', type=int, nargs='+', help="Ids of gpu")
     args = parser.parse_args()
@@ -72,6 +73,7 @@ def train_dp():
         train_x[i, :total, 7] = train_x[i, :total, 7] + 1
 
     init_token = np.zeros((train_x.shape[0], 7, 3), dtype=np.int32)
+    print('init_token:',init_token.shape)
 
     num_batch = len(train_x) // batch_size
 
@@ -90,16 +92,20 @@ def train_dp():
     # init
 
     net = torch.nn.DataParallel(CMT(decoder_n_class, init_n_class))
+    # print('in 92 train.py========================')
 
     if torch.cuda.is_available():
         net.cuda()
+        # print('in 96 train.py========================')
 
     DEVICE_COUNT = torch.cuda.device_count()
     log("DEVICE COUNT:", DEVICE_COUNT)
     log("VISIBLE: " + os.environ["CUDA_VISIBLE_DEVICES"])
 
     net.train()
+    # print('in 103 train.py========================')
     n_parameters = network_paras(net)
+    # print('in 105 train.py========================')
     log('n_parameters: {:,}'.format(n_parameters))
     saver_agent.add_summary_msg(
         ' > params amount: {:,d}'.format(n_parameters))
@@ -107,9 +113,11 @@ def train_dp():
     if args.path is not None:
         print('[*] load model from:', args.path)
         net.load_state_dict(torch.load(args.path))
+        # print('in 113 train.py========================')
 
     # optimizers
     optimizer = optim.Adam(net.parameters(), lr=init_lr)
+    # print('in 117 train.py========================')
 
     log('    train_data:', path_train_data.split("/")[-2])
     log('    batch_size:', batch_size)
@@ -157,16 +165,19 @@ def train_dp():
                 batch_mask = batch_mask.cuda()
                 batch_init = batch_init.cuda()
 
-            # run
+            # run,在这里用CMT网络
             losses = net(is_train=True, x=batch_x, target=batch_y, loss_mask=batch_mask, init_token=batch_init)
+            print('before 162 in train.py========================')
             losses = [l.sum() for l in losses]
             loss = (losses[0] + losses[1] + losses[2] + losses[3] + losses[4] + losses[5] + losses[6]) / 7
 
             # Update
             net.zero_grad()
+            # print('before net.zero_grad()===========================')
             loss.backward()
             if max_grad_norm is not None:
                 clip_grad_norm_(net.parameters(), max_grad_norm)
+                # print('before net.parameters()===========================')
             optimizer.step()
 
             # print
@@ -207,12 +218,12 @@ def train_dp():
             saver_agent.save_model(net, name='loss_' + str(fn))
         elif loss <= 0.001:
             log('Finished')
-            return
+            # return
 
 
 #        else:
 #            saver_agent.save_model(net, name='loss_high')
 
 
-if __name__ == '__main__':
-    train_dp()
+# if __name__ == '__main__':
+#     train_dp()

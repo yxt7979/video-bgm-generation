@@ -7,7 +7,7 @@ decorator==4.4.2
 enum34==1.1.10
 funcsigs==1.0.2
 futures==3.3.0
-icc-rt==2020.0.133
+
 idna==2.10
 imageio==2.4.1
 intel-openmp==2021.4.0
@@ -36,7 +36,6 @@ singledispatch==3.6.1
 six==1.15.0
 soupsieve==1.9.6
 subprocess32==3.5.4
-tbb==2021.4.0
 tbb4py==2019.0
 termcolor==1.1.0
 tqdm==4.59.0

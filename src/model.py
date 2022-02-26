@@ -27,9 +27,12 @@ def softmax_with_temperature(logits, temperature):
 
 def weighted_sampling(probs):
     probs /= (sum(probs) + 1e-10)
+    # 降序排序
     sorted_probs = np.sort(probs)[::-1]
+    # 降序排序后返回索引值
     sorted_index = np.argsort(probs)[::-1]
     try:
+        # 返回很多索引值，在索引中随机选择一个
         word = np.random.choice(sorted_index, size=1, p=sorted_probs)[0]
     except:
         word = sorted_index[0]
@@ -41,6 +44,7 @@ def nucleus(probs, p):
     probs /= (sum(probs) + 1e-5)
     sorted_probs = np.sort(probs)[::-1]
     sorted_index = np.argsort(probs)[::-1]
+    # 累计加和
     cusum_sorted_probs = np.cumsum(sorted_probs)
     after_threshold = cusum_sorted_probs > p
     if sum(after_threshold) > 0:
@@ -53,8 +57,9 @@ def nucleus(probs, p):
     word = np.random.choice(candi_index, size=1, p=candi_probs)[0]
     return word
 
-
+# 由logic得到最有可能的word
 def sampling(logit, p=None, t=1.0):
+    # sqeeze()删除单维度条目，.cpu()是将数据处理放在cpu上。
     logit = logit.squeeze().cpu().numpy()
     probs = softmax_with_temperature(logits=logit, temperature=t)
 
@@ -80,6 +85,10 @@ last dimension of input data | attribute:
 
 class CMT(nn.Module):
     def __init__(self, n_token, init_n_token, is_training=True):
+        self.encoder_emb_time_linear = None
+        self.encoder_emb_linear = None
+        self.encoder_pos_emb = None
+        print('********************__init__***************************')
         super(CMT, self).__init__()
 
         print("D_MODEL", D_MODEL, " N_LAYER", N_LAYER_ENCODER, " N_HEAD", N_HEAD, "DECODER ATTN", ATTN_DECODER)
@@ -93,6 +102,7 @@ class CMT(nn.Module):
         self.n_head = N_HEAD  #
         self.d_head = D_MODEL // N_HEAD
         self.d_inner = 2048
+        # 交叉熵损失函数
         self.loss_func = nn.CrossEntropyLoss(reduction='none')
         # self.emb_sizes = [64, 32, 512, 128, 32]
         self.emb_sizes = [64, 32, 64, 512, 128, 32, 64]
@@ -117,7 +127,8 @@ class CMT(nn.Module):
         self.encoder_emb_instr = Embeddings(self.n_token[5], self.emb_sizes[5])
         self.encoder_emb_onset_density = Embeddings(self.n_token[6], self.emb_sizes[6])
         self.encoder_emb_time_encoding = Embeddings(self.n_token[7], self.time_encoding_size)
-        self.encoder_pos_emb = BeatPositionalEncoding(self.d_model, self.dropout)
+        # 在同一节拍内的每个标记将得到相同的位置编码
+        self.encoder_pos_emb_func = BeatPositionalEncoding(self.d_model, self.dropout)
 
         # # linear
         self.encoder_in_linear = nn.Linear(int(np.sum(self.emb_sizes)), self.d_model)
@@ -147,18 +158,21 @@ class CMT(nn.Module):
         self.proj_onset_density = nn.Linear(self.d_model, self.n_token[6])
 
     def compute_loss(self, predict, target, loss_mask):
+        print('********************compute_loss***************************')
         loss = self.loss_func(predict, target)
         loss = loss * loss_mask
         loss = torch.sum(loss) / torch.sum(loss_mask)
         return loss
 
     def forward_init_token_vis(self, x, memory=None, is_training=True):
+        print('********************forward_init_token_vis***************************')
         emb_genre = self.init_emb_genre(x[..., 0])
         emb_key = self.init_emb_key(x[..., 1])
         emb_instrument = self.init_emb_instrument(x[..., 2])
         return emb_genre, emb_key, emb_instrument
 
     def forward_init_token(self, x, memory=None, is_training=True):
+        print('********************forward_init_token***************************')
         emb_genre = self.init_emb_genre(x[..., 0])
         emb_key = self.init_emb_key(x[..., 1])
         emb_instrument = self.init_emb_instrument(x[..., 2])
@@ -174,10 +188,13 @@ class CMT(nn.Module):
         else:
             pos_emb = encoder_emb_linear.squeeze(0)
             h, memory = self.transformer_encoder(pos_emb, memory=memory)
+            print('--------use transformer in model.py 188--------------------------------')
             y_type = self.proj_type(h)
             return h, y_type, memory
 
     def forward_hidden(self, x, memory=None, is_training=True, init_token=None):
+        print('***********forward_hidden***************************')
+        # h, y_type = self.forward_hidden(x, memory=None, is_training=True, init_token=init_token)
         # linear transformer: b, s, f   x.shape=(bs, nf)
 
         # embeddings
@@ -188,6 +205,7 @@ class CMT(nn.Module):
         emb_duration = self.encoder_emb_duration(x[..., 4])
         emb_instr = self.encoder_emb_instr(x[..., 5])
         emb_onset_density = self.encoder_emb_onset_density(x[..., 6])
+
         emb_time_encoding = self.encoder_emb_time_encoding(x[..., 7])
 
         embs = torch.cat(
@@ -201,31 +219,36 @@ class CMT(nn.Module):
                 emb_onset_density
             ], dim=-1)
 
-        encoder_emb_linear = self.encoder_in_linear(embs)
+        self.encoder_emb_linear = self.encoder_in_linear(embs)
         # import ipdb;ipdb.set_trace()
-        encoder_emb_time_linear = self.encoder_time_linear(emb_time_encoding)
-        encoder_emb_linear = encoder_emb_linear + encoder_emb_time_linear
-        encoder_pos_emb = self.encoder_pos_emb(encoder_emb_linear, x[:, :, 8])
+        self.encoder_emb_time_linear = self.encoder_time_linear(emb_time_encoding)
+        # print(self.encoder_emb_linear.size())
+        self.encoder_emb_linear = self.encoder_emb_linear + self.encoder_emb_time_linear
+        # print(encoder_emb_linear.size())
+        self.encoder_pos_emb = self.encoder_pos_emb_func(self.encoder_emb_linear, x[:, :, 8])
+        # print(encoder_pos_emb.size())
 
         if is_training:
             assert init_token is not None
             init_emb_linear = self.forward_init_token(init_token)
-            encoder_pos_emb = torch.cat([init_emb_linear, encoder_pos_emb], dim=1)
+            self.encoder_pos_emb = torch.cat([init_emb_linear, self.encoder_pos_emb], dim=1)
         else:
             assert init_token is not None
             init_emb_linear = self.forward_init_token(init_token)
-            encoder_pos_emb = torch.cat([init_emb_linear, encoder_pos_emb], dim=1)
+            self.encoder_pos_emb = torch.cat([init_emb_linear, self.encoder_pos_emb], dim=1)
         # transformer
         if is_training:
-            attn_mask = TriangularCausalMask(encoder_pos_emb.size(1), device=x.device)
-            encoder_hidden = self.transformer_encoder(encoder_pos_emb, attn_mask)
+            attn_mask = TriangularCausalMask(self.encoder_pos_emb.size(1), device=x.device)
+            encoder_hidden = self.transformer_encoder(self.encoder_pos_emb, attn_mask)
+            print('--------use transformer in model.py 234--------------------------------')
             # print("forward decoder done")
             y_type = self.proj_type(encoder_hidden[:, 7:, :])
             return encoder_hidden, y_type
 
         else:
-            encoder_mask = TriangularCausalMask(encoder_pos_emb.size(1), device=x.device)
-            h = self.transformer_encoder(encoder_pos_emb, encoder_mask)  # y: s x d_model
+            encoder_mask = TriangularCausalMask(self.encoder_pos_emb.size(1), device=x.device)
+            h = self.transformer_encoder(self.encoder_pos_emb, encoder_mask)  # y: s x d_model
+            print('--------use transformer in model.py 242--------------------------------')
             h = h[:, -1:, :]
             h = h.squeeze(0)
             y_type = self.proj_type(h)
@@ -233,6 +256,7 @@ class CMT(nn.Module):
             return h, y_type
 
     def forward_output(self, h, y):
+        print('***********forward_output***************************')
         # for training
         tf_skip_type = self.encoder_emb_type(y[..., 1])
         h = h[:, 7:, :]
@@ -251,10 +275,13 @@ class CMT(nn.Module):
         return y_barbeat, y_pitch, y_duration, y_instr, y_onset_density, y_beat_density
 
     def forward_output_sampling(self, h, y_type, recurrent=True):
+        print('********************forward_output_sampling***************************')
         '''
         for inference
+        由h和type，估计出风格并concat后，返回估计的7个属性
         '''
         y_type_logit = y_type[0, :]  # dont know wtf
+        # 由type的概率列表得到最后可能的type
         cur_word_type = sampling(y_type_logit, p=0.90)
 
         type_word_t = torch.from_numpy(
@@ -262,16 +289,16 @@ class CMT(nn.Module):
 
         if torch.cuda.is_available():
             type_word_t = type_word_t.cuda()
-
+        # 将当前type进行embedding
         tf_skip_type = self.encoder_emb_type(type_word_t).squeeze(0)
 
         # concat
         y_concat_type = torch.cat([h, tf_skip_type], dim=-1)
+        # 将concat后的全连接变成512的
         y_ = self.project_concat_type(y_concat_type)
 
         # project other
         y_barbeat = self.proj_barbeat(y_)
-
         y_pitch = self.proj_pitch(y_)
         y_duration = self.proj_duration(y_)
         y_instr = self.proj_instr(y_)
@@ -299,6 +326,7 @@ class CMT(nn.Module):
         return next_arr
 
     def inference_from_scratch(self, **kwargs):
+        print('********************inference_from_scratch***************************')
         vlog = kwargs['vlog']
         C = kwargs['C']
 
@@ -443,11 +471,14 @@ class CMT(nn.Module):
 
 
     def train_forward(self, **kwargs):
-        x = kwargs['x']
-        target = kwargs['target']
+        print('********************train_forward***************************')
+        # losses = net(is_train=True, x=batch_x, target=batch_y, loss_mask=batch_mask, init_token=batch_init)
+        x = kwargs['x']             # train_x
+        target = kwargs['target']   # train_y
         loss_mask = kwargs['loss_mask']
         init_token = kwargs['init_token']
         h, y_type = self.forward_hidden(x, memory=None, is_training=True, init_token=init_token)
+        print('h,y_type:',h,y_type)
         y_barbeat, y_pitch, y_duration, y_instr, y_onset_density, y_beat_density = self.forward_output(h, target)
 
         # reshape (b, s, f) -> (b, f, s)
@@ -478,6 +509,8 @@ class CMT(nn.Module):
         return loss_barbeat, loss_type, loss_pitch, loss_duration, loss_instr, loss_onset_density, loss_beat_density
 
     def forward(self, **kwargs):
+        print('********************in forward***************************')
+        # losses = net(is_train=True, x=batch_x, target=batch_y, loss_mask=batch_mask, init_token=batch_init)
         if kwargs['is_train']:
             return self.train_forward(**kwargs)
         return self.inference_from_scratch(**kwargs)
